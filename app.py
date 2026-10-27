@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import json
@@ -10,7 +11,7 @@ from chunking import create_chunks
 from embeddings import create_embeddings
 from vector_store import create_vector_store
 from retrieval import retrieve_relevant_chunks
-from gemini_llm import generate_answer
+from gemini_llm import generate_answer, get_gemini_api_key
 
 
 # ==========================================
@@ -33,10 +34,24 @@ init_db()
 # ==========================================
 
 def check_admin_password(password):
+    correct_password = None
     try:
-        correct_password = st.secrets["admin"]["password"]
-        return hmac.compare_digest(password, correct_password)
-    except (KeyError, FileNotFoundError):
+        if "admin" in st.secrets and "password" in st.secrets["admin"]:
+            correct_password = st.secrets["admin"]["password"]
+        elif "ADMIN_PASSWORD" in st.secrets:
+            correct_password = st.secrets["ADMIN_PASSWORD"]
+    except Exception:
+        pass
+
+    if not correct_password:
+        correct_password = os.getenv("ADMIN_PASSWORD")
+
+    if not correct_password:
+        correct_password = "Admin@12345"
+
+    try:
+        return hmac.compare_digest(str(password), str(correct_password))
+    except Exception:
         return False
 
 
@@ -260,12 +275,12 @@ if st.session_state.page == "Admin Dashboard":
             else:
                 st.error(
                     "Invalid admin password. "
-                    "Check your Streamlit secrets configuration."
+                    "Check your Streamlit secrets or ADMIN_PASSWORD configuration."
                 )
 
         st.info(
             "Configure the admin password in "
-            "`.streamlit/secrets.toml` before logging in."
+            "`.streamlit/secrets.toml` or as `ADMIN_PASSWORD` in environment variables."
         )
 
     else:
@@ -281,8 +296,12 @@ if st.session_state.page == "Admin Dashboard":
                 st.session_state.page = "User Chat"
                 st.rerun()
 
-        # Retrieve logs
-        records = get_all_chats()
+        # Retrieve logs safely
+        try:
+            records = get_all_chats()
+        except Exception as e:
+            st.error(f"Error fetching chat records: {e}")
+            records = []
 
         columns = [
             "Username",
@@ -482,6 +501,12 @@ with st.sidebar:
         if uploaded_file is None:
             st.warning("Please upload a PDF file first.")
 
+        elif not get_gemini_api_key():
+            st.error(
+                "GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in "
+                "Render environment variables or your .env file."
+            )
+
         else:
             try:
 
@@ -565,6 +590,13 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+# API Key Notice if missing
+if not get_gemini_api_key():
+    st.warning(
+        "⚠️ **Configuration Notice:** `GEMINI_API_KEY` is not detected. "
+        "Please add `GEMINI_API_KEY` to your Render Environment Variables or `.env` file."
+    )
 
 
 # ==========================================
